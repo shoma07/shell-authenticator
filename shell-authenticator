@@ -1,0 +1,38 @@
+#!/bin/sh
+
+DEFAULT_INTERVAL=30
+DEFAULT_DIGITS=6
+
+timeint () {
+  echo "$(date -u +%s)"
+}
+
+timecode () {
+  echo "$(($(timeint)/${DEFAULT_INTERVAL}))"
+}
+
+generate_hmac () {
+  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
+  echo "$(echo $(timecode) | openssl dgst -sha1 -hmac ${args})"
+}
+
+ord () {
+  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
+  echo "${args}" | xxd -b -c1 | head -n 1 | while read one two three; do
+    echo "${two}" | xargs -I@ dc -e "10o 2i @ p"
+  done
+}
+
+generate_otp () {
+  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
+  hmac=$(echo ${args} | generate_hmac)
+  offset=$(($(echo ${hmac:19:1} | ord)&15))
+  code1=$(($(($(echo ${hmac:${offset}:1} | ord)&7))<<24))
+  code2=$(($(($(echo ${hmac:$((${offset}+1)):1} | ord)&7))<<16))
+  code3=$(($(($(echo ${hmac:$((${offset}+2)):1} | ord)&7))<<8))
+  code4=$(($(echo ${hmac:$((${offset}+3)):1} | ord)&7))
+  code=$((${code1}|${code2}|${code3}|${code4}))
+  echo $((${code}%10**${DEFAULT_DIGITS})) | xargs -I @ printf %06d @
+}
+
+echo $(echo ${1} | generate_otp)
