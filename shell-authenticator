@@ -8,65 +8,73 @@ timeint () {
 }
 
 timecode () {
-  echo "$(($(timeint)/${DEFAULT_INTERVAL}))"
-}
+  if [ -p /dev/stdin ] && [ -z "${@}" ]; then args=$(cat -); else args=${@}; fi
 
-generate_hmac () {
-  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
-  # echo "$(echo $(echo $(timecode) | int2bytestring) | openssl dgst -sha1 -hmac ${args})"
-  printf "%s\n" "$(printf "%s\n" $(echo $(timecode) | int2bytestring) | openssl dgst -sha1 -hmac ${args})"
-}
-
-ord () {
-  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
-  echo "${args}" | xxd -b -c1 | head -n 1 | while read one two three; do
-    echo "${two}" | xargs -I@ dc -e "10o 2i @ p"
-  done
+  int="${args}"
+  if [ -z "${int}" ];then int=$(timeint); fi
+  echo $((${int}/${DEFAULT_INTERVAL}))
 }
 
 int2bytestring () {
-  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
-  int=${args[0]}
+  if [ -p /dev/stdin ] && [ -z "${@}" ]; then args=$(cat -); else args=${@}; fi
+
+  int="${args}"
   array=()
-  result=()
   while :; do
     array+=("$((${int}&0xFF))")
     int=$((${int}>>8))
     if [ ${int} = 0 ]; then break; fi
   done
-  for (( i = 7; i >= 0; i-- )); do
+  printf "%s" $(for (( i = 7; i >= 0; i-- )); do
     if [ -z "${array[i]}" ]; then
-      printf "\\\x%02X" 0
+      printf "\\\x%02X" "0"
     else
-      printf "\\\x%02X" ${array[i]}
+      printf "\\\x%02X" "${array[i]}"
     fi
-  done
-  printf "\n"
+  done)
 }
 
-chr () {
-  if [ -p /dev/stdin ]; then args=`cat -`; else args=$1; fi
-  printf "\\\x%02X\n" ${args}
+base32_decode () {
+  if [ -p /dev/stdin ] && [ -z "${@}" ]; then args=$(cat -); else args=${@}; fi
+
+  chars=(a b c d e f g h i j k l m n o p q r s t u v w x y z 2 3 4 5 6 7)
+  printf "%s" $(echo $(echo "${args}" | sed "s/=//g") | fold -8 | while read s; do
+    echo $(echo "${s}" | fold -1 | while read c; do
+      c=$(echo ${c} | tr '[A-Z]' '[a-z]')
+      for (( i = 0; i < ${#chars[@]}; i++ )); do
+        if [ "${chars[${i}]}" != "${c}" ]; then continue; fi
+
+        printf "%05d" $(echo "obase=2;ibase=10;${i}" | bc)
+        break
+      done
+    done) | fold -8 | while read b; do
+      if [ ${#b} -lt 8 ]; then break; fi
+
+      printf "\\\x%02X" "$(echo "obase=10;ibase=2;${b}" | bc)"
+    done
+  done)
+}
+
+h2d () {
+  if [ -p /dev/stdin ] && [ -z "${@}" ]; then args=$(cat -); else args=${@}; fi
+
+  echo "obase=10;ibase=16;$(echo ${args} | tr '[a-z]' '[A-Z]')" | bc
 }
 
 generate_otp () {
-  if [ -p /dev/stdin ]; then args=`cat -`; else args=$@; fi
-  hmac=$(echo ${args} | generate_hmac)
-  offset=$(($(echo ${hmac:20:1} | ord)&15))
-  echo ${offset}
-  code1=$(($(($(echo ${hmac:${offset}:1} | ord)&7))<<24))
-  code2=$(($(($(echo ${hmac:$((${offset}+1)):1} | ord)&7))<<16))
-  code3=$(($(($(echo ${hmac:$((${offset}+2)):1} | ord)&7))<<8))
-  code4=$(($(echo ${hmac:$((${offset}+3)):1} | ord)&7))
-  code=$((${code1}|${code2}|${code3}|${code4}))
-  echo $((${code}%10**${DEFAULT_DIGITS})) | xargs -I @ printf %06d @
+  if [ -p /dev/stdin ] && [ -z "${@}" ]; then args=$(cat -); else args=${@}; fi
+
+  data=$(int2bytestring $(timecode))
+  key=$(base32_decode ${args})
+  hmac=$(printf ${data} | openssl dgst -sha1 -hmac "$(printf ${key})")
+  offset=$(($(($(h2d ${hmac:38:2})&0xf))*2))
+  code=$((
+    $(($(($(h2d ${hmac:${offset}:2})&0x7f))<<24))|
+    $(($(($(h2d ${hmac:$((${offset}+2)):2})&0xff))<<16))|
+    $(($(($(h2d ${hmac:$((${offset}+4)):2})&0xff))<<8))|
+    $(($(h2d ${hmac:$((${offset}+6)):2})&0xff))
+  ))
+  printf "%06d\n" $((${code}%10**${DEFAULT_DIGITS}))
 }
 
-# echo ${1} | generate_otp
-echo $(generate_hmac "y6csbln7caazq7zkvxjklwt5zujntf44")
-
-# otpauth://totp/TestApp:test@example.com?secret=y6csbln7caazq7zkvxjklwt5zujntf44&issuer=TestApp
-
-# echo $(timecode) | int2bytestring
-# echo "52475501" | int2bytestring
-# echo $(echo $(echo $1) | generate_hmac)
+generate_otp ${1}

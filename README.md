@@ -8,5 +8,12 @@ Shell Authenticator support RFC6238 Time-based One-time Password Algorithm (TOPT
 $ shell-authenticator <secret>
 ```
 
+## Feature
+
+- Automatically updated screen
+- Support HOPT
+- Manage configuration files
+- Configuration file encryption
+
 ## License
-The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
+[MIT License](https://opensource.org/licenses/MIT).
